@@ -1,17 +1,20 @@
 package main
 
 import (
+	//"context"
 	"database/sql"
 	"encoding/csv"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"os"
 	"strings"
 	"sync"
 
+	//外部ファイル
 	"github.com/gin-gonic/gin"
-	_ "github.com/go-sql-driver/mysql"
+	_ "github.com/denisenkom/go-mssqldb"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
 )
@@ -19,9 +22,6 @@ import (
 type User struct {
 	UserId   string `json:"userid"`
 	Password string `json:"password"`
-}
-type Cnt struct {
-	Count string `json:"usercnt"`
 }
 
 type VarChart struct {
@@ -51,7 +51,6 @@ type ReturnTest struct {
 // 	IsSessionAlive bool        //セッションが生きているかどうか
 }
 
-var ConnectionString string = "root:p@ssw0rd@/study"
 var Info SessionInfo
 
 func CORSMiddleware() gin.HandlerFunc {
@@ -80,66 +79,65 @@ func main() {
 	//Action
 	server.GET("/getBarChartData", getBarChartData)
 	server.GET("/getPieChartData", getPieChartData)
-	server.GET("/sessionCheck", sessionCheck)
-
-	server.POST("/signin", signin)
+	
 	server.POST("/getListData", getListData)
 	server.POST("/impcsv", impcsv)
+	server.POST("/sessionCheck", sessionCheck)
+	server.POST("/signin", signin)
 
 	//指定のポート番号でサーバー実行
 	server.Run(":8888")
 }
 
 func sessionCheck(g *gin.Context) {
-	session := sessions.Default(g)
-	Info.UserId = session.Get("UserId")
+	g.BindJSON(&Info)
+	
+	// // セッションがない場合
+	// if Info.UserId == nil {
+	// 	g.JSON(440,"セッションが切れています。ログインしなおしてください。")
+	// // セッションがある場合
+	// } else {
+		g.JSON(200, Info)
+	// }
 
-	// セッションがない場合
-	if Info.UserId == nil {
-		// g.JSON(440,"セッションが切れています。ログインしなおしてください。")
-	// セッションがある場合
-	} else {
-		//何もしない？
-	}
 }
 
 func signin(g *gin.Context) {
 
 	//構造体定義
 	var user User
-	var cnt Cnt
+	var cnt int
 
-	// 第2引数の形式は "user:password@tcp(host:port)/dbname"
-	db, err := sql.Open("mysql", ConnectionString)
-	if err != nil {
-		panic(err.Error())
-	}
-	defer db.Close()
+	//dbは*sql.DB
+	db, openerr := sql.Open("sqlserver", getconnString("ConnectionString.txt"))
+    if openerr != nil {
+        log.Fatal("Error creating connection pool: ", openerr.Error())
+    }
 
 	//ログインユーザー用変数の変数にバインド
 	g.BindJSON(&user)
 
-	// Select文発行
-	err = db.QueryRow(
-      "SELECT " + 
-           "cast(count(id) as char) usercnt " +
-      "FROM " +
-		  "study.login_user " +
-	  "WHERE " + 
-	  	 "id = '" + user.UserId + "' " + 
-		 "and password = '" + user.Password + "'").Scan(&(cnt.Count))
 
+	// Select文発行
+	rows,queryerr := db.Query(
+		getSQL("S-signin.txt"),
+	    sql.NamedArg{ Name: "UserID", Value:  user.UserId },
+	    sql.NamedArg{ Name: "Password", Value:  user.Password })
 	// エラーがない場合、セッションセット
-	if err == nil {
+	if queryerr == nil {
 		session := sessions.Default(g)
 		session.Options(sessions.Options{MaxAge: 600})
 		session.Set("UserId", user.UserId)
 		session.Save()
+
+		rows.Next()
+		queryerr = rows.Scan(&cnt)
+
 		//JSONにして返却
-		g.JSON(200, gin.H{"UserID": user.UserId, "usercnt":cnt.Count})
+		g.JSON(200, gin.H{"UserID": user.UserId, "usercnt":cnt})
 	// エラーの場合
 	}else{
-		panic(err.Error())
+		log.Fatal("Error creating connection pool#: ", queryerr)
 	}
 }
 
@@ -226,7 +224,7 @@ func errcheck(filename string, record [][]string) int {
 
 	// 項目数チェック
 	for value := range record {
-		if len(record[value]) != 85 {
+		if len(record[value]) <= 85 {
 			return 2
 		}
 	}
@@ -236,15 +234,12 @@ func errcheck(filename string, record [][]string) int {
 }
 
 func execInsert(record [][]string) {
-
-	// insert文雛形
-	sqlbase := "INSERT INTO study.kintai_imp VALUES (?,?,str_to_date(?,'%Y/%m/%d'),?,?,?,?,?,?,?,?,?,str_to_date(?,'%Y/%m/%d'),str_to_date(?,'%Y/%m/%d'),?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
-
 	// コネクション作成
-	db, err := sql.Open("mysql", "root:p@ssw0rd@/study")
-	if err != nil {
-		panic(err.Error())
-	}
+	//dbは*sql.DB
+	db, openerr := sql.Open("sqlserver", getconnString("ConnectionString.txt"))
+    if openerr != nil {
+        log.Fatal("Error creating connection pool: ", openerr.Error())
+    }
 	// 必ずclose＠おまじない
 	defer db.Close()
 
@@ -274,92 +269,102 @@ func execInsert(record [][]string) {
 
 			// Insert文発行
 			_, err = tx.Exec(
-				sqlbase,
-				record[i][0],
-				record[i][1],
-				record[i][2],
-				record[i][3],
-				record[i][4],
-				record[i][5],
-				record[i][6],
-				record[i][7],
-				record[i][8],
-				record[i][9],
-				record[i][10],
-				record[i][11],
-				record[i][12],
-				record[i][13],
-				record[i][14],
-				record[i][15],
-				record[i][16],
-				record[i][17],
-				record[i][18],
-				record[i][19],
-				record[i][20],
-				record[i][21],
-				record[i][22],
-				record[i][23],
-				record[i][24],
-				record[i][25],
-				record[i][26],
-				record[i][27],
-				record[i][28],
-				record[i][29],
-				record[i][30],
-				record[i][31],
-				record[i][32],
-				record[i][33],
-				record[i][34],
-				record[i][35],
-				record[i][36],
-				record[i][37],
-				record[i][38],
-				record[i][39],
-				record[i][40],
-				record[i][41],
-				record[i][42],
-				record[i][43],
-				record[i][44],
-				record[i][45],
-				record[i][46],
-				record[i][47],
-				record[i][48],
-				record[i][49],
-				record[i][50],
-				record[i][51],
-				record[i][52],
-				record[i][53],
-				record[i][54],
-				record[i][55],
-				record[i][56],
-				record[i][57],
-				record[i][58],
-				record[i][59],
-				record[i][60],
-				record[i][61],
-				record[i][62],
-				record[i][63],
-				record[i][64],
-				record[i][65],
-				record[i][66],
-				record[i][67],
-				record[i][68],
-				record[i][69],
-				record[i][70],
-				record[i][71],
-				record[i][72],
-				record[i][73],
-				record[i][74],
-				record[i][75],
-				record[i][76],
-				record[i][77],
-				record[i][78],
-				record[i][79],
-				record[i][80],
-				record[i][81],
-				record[i][82],
-				record[i][83],
-				record[i][84])
+				getSQL("I-execInsert.txt"),
+				sql.NamedArg{ Name: "P0", Value: record[i][0]},
+				sql.NamedArg{ Name: "P1", Value: record[i][1]},
+				sql.NamedArg{ Name: "P2", Value: record[i][2]},
+				sql.NamedArg{ Name: "P3", Value: record[i][3]},
+				sql.NamedArg{ Name: "P4", Value: record[i][4]},
+				sql.NamedArg{ Name: "P5", Value: record[i][5]},
+				sql.NamedArg{ Name: "P6", Value: record[i][6]},
+				sql.NamedArg{ Name: "P7", Value: record[i][7]},
+				sql.NamedArg{ Name: "P8", Value: record[i][8]},
+				sql.NamedArg{ Name: "P9", Value: record[i][9]},
+				sql.NamedArg{ Name: "P10", Value: record[i][10]},
+				sql.NamedArg{ Name: "P11", Value: record[i][11]},
+				sql.NamedArg{ Name: "P12", Value: record[i][12]},
+				sql.NamedArg{ Name: "P13", Value: record[i][13]},
+				sql.NamedArg{ Name: "P14", Value: record[i][14]},
+				sql.NamedArg{ Name: "P15", Value: record[i][15]},
+				sql.NamedArg{ Name: "P16", Value: record[i][16]},
+				sql.NamedArg{ Name: "P17", Value: record[i][17]},
+				sql.NamedArg{ Name: "P18", Value: record[i][18]},
+				sql.NamedArg{ Name: "P19", Value: record[i][19]},
+				sql.NamedArg{ Name: "P20", Value: record[i][20]},
+				sql.NamedArg{ Name: "P21", Value: record[i][21]},
+				sql.NamedArg{ Name: "P22", Value: record[i][22]},
+				sql.NamedArg{ Name: "P23", Value: record[i][23]},
+				sql.NamedArg{ Name: "P24", Value: record[i][24]},
+				sql.NamedArg{ Name: "P25", Value: record[i][25]},
+				sql.NamedArg{ Name: "P26", Value: record[i][26]},
+				sql.NamedArg{ Name: "P27", Value: record[i][27]},
+				sql.NamedArg{ Name: "P28", Value: record[i][28]},
+				sql.NamedArg{ Name: "P29", Value: record[i][29]},
+				sql.NamedArg{ Name: "P30", Value: record[i][30]},
+				sql.NamedArg{ Name: "P31", Value: record[i][31]},
+				sql.NamedArg{ Name: "P32", Value: record[i][32]},
+				sql.NamedArg{ Name: "P33", Value: record[i][33]},
+				sql.NamedArg{ Name: "P34", Value: record[i][34]},
+				sql.NamedArg{ Name: "P35", Value: record[i][35]},
+				sql.NamedArg{ Name: "P36", Value: record[i][36]},
+				sql.NamedArg{ Name: "P37", Value: record[i][37]},
+				sql.NamedArg{ Name: "P38", Value: record[i][38]},
+				sql.NamedArg{ Name: "P39", Value: record[i][39]},
+				sql.NamedArg{ Name: "P40", Value: record[i][40]},
+				sql.NamedArg{ Name: "P41", Value: record[i][41]},
+				sql.NamedArg{ Name: "P42", Value: record[i][42]},
+				sql.NamedArg{ Name: "P43", Value: record[i][43]},
+				sql.NamedArg{ Name: "P44", Value: record[i][44]},
+				sql.NamedArg{ Name: "P45", Value: record[i][45]},
+				sql.NamedArg{ Name: "P46", Value: record[i][46]},
+				sql.NamedArg{ Name: "P47", Value: record[i][47]},
+				sql.NamedArg{ Name: "P48", Value: record[i][48]},
+				sql.NamedArg{ Name: "P49", Value: record[i][49]},
+				sql.NamedArg{ Name: "P50", Value: record[i][50]},
+				sql.NamedArg{ Name: "P51", Value: record[i][51]},
+				sql.NamedArg{ Name: "P52", Value: record[i][52]},
+				sql.NamedArg{ Name: "P53", Value: record[i][53]},
+				sql.NamedArg{ Name: "P54", Value: record[i][54]},
+				sql.NamedArg{ Name: "P55", Value: record[i][55]},
+				sql.NamedArg{ Name: "P56", Value: record[i][56]},
+				sql.NamedArg{ Name: "P57", Value: record[i][57]},
+				sql.NamedArg{ Name: "P58", Value: record[i][58]},
+				sql.NamedArg{ Name: "P59", Value: record[i][59]},
+				sql.NamedArg{ Name: "P60", Value: record[i][60]},
+				sql.NamedArg{ Name: "P61", Value: record[i][61]},
+				sql.NamedArg{ Name: "P62", Value: record[i][62]},
+				sql.NamedArg{ Name: "P63", Value: record[i][63]},
+				sql.NamedArg{ Name: "P64", Value: record[i][64]},
+				sql.NamedArg{ Name: "P65", Value: record[i][65]},
+				sql.NamedArg{ Name: "P66", Value: record[i][66]},
+				sql.NamedArg{ Name: "P67", Value: record[i][67]},
+				sql.NamedArg{ Name: "P68", Value: record[i][68]},
+				sql.NamedArg{ Name: "P69", Value: record[i][69]},
+				sql.NamedArg{ Name: "P70", Value: record[i][70]},
+				sql.NamedArg{ Name: "P71", Value: record[i][71]},
+				sql.NamedArg{ Name: "P72", Value: record[i][72]},
+				sql.NamedArg{ Name: "P73", Value: record[i][73]},
+				sql.NamedArg{ Name: "P74", Value: record[i][74]},
+				sql.NamedArg{ Name: "P75", Value: record[i][75]},
+				sql.NamedArg{ Name: "P76", Value: record[i][76]},
+				sql.NamedArg{ Name: "P77", Value: record[i][77]},
+				sql.NamedArg{ Name: "P78", Value: record[i][78]},
+				sql.NamedArg{ Name: "P79", Value: record[i][79]},
+				sql.NamedArg{ Name: "P80", Value: record[i][80]},
+				sql.NamedArg{ Name: "P81", Value: record[i][81]},
+				sql.NamedArg{ Name: "P82", Value: record[i][82]},
+				sql.NamedArg{ Name: "P83", Value: record[i][83]},
+				sql.NamedArg{ Name: "P84", Value: record[i][84]},
+				sql.NamedArg{ Name: "P85", Value: record[i][85]},
+				sql.NamedArg{ Name: "P86", Value: record[i][86]},
+				sql.NamedArg{ Name: "P87", Value: record[i][87]},
+				sql.NamedArg{ Name: "P88", Value: record[i][88]},
+				sql.NamedArg{ Name: "P89", Value: record[i][89]},
+				sql.NamedArg{ Name: "P90", Value: record[i][90]},
+				sql.NamedArg{ Name: "P91", Value: record[i][91]},
+				sql.NamedArg{ Name: "P92", Value: record[i][92]},
+				sql.NamedArg{ Name: "P93", Value: record[i][93]},
+			)
 
 			if err != nil {
 				tx.Rollback()
@@ -382,7 +387,7 @@ func getBarChartData(g *gin.Context) {
 	var name, value string
 
 	// コネクション作成
-	db, err := sql.Open("mysql", "root:p@ssw0rd@/study")
+	db, err := sql.Open("sqlserver", getconnString("ConnectionString.txt"))
 	if err != nil {
 		panic(err.Error())
 	}
@@ -390,60 +395,7 @@ func getBarChartData(g *gin.Context) {
 	defer db.Close()
 
 	//SQL実行
-	rows, err := db.Query(
-		"SELECT "+
-			"'80時間以上' NAME "+
-			",COUNT(employee_id) cnt "+
-		"FROM "+
-		"( "+
-			"SELECT "+
-				"employee_id "+
-				",(sum(kinmu_time) - sum(shotei_kinmu_count))/3 heikinzangyou "+
-			"FROM "+
-				"kintai_imp "+
-			"WHERE "+
-				"pay_target_date IN (select pay_target_date FROM (SELECT distinct pay_target_date FROM kintai_imp ORDER BY pay_target_date DESC LIMIT 3) tmp) "+
-			"GROUP BY "+
-				"employee_id "+
-		") target "+
-		"WHERE "+
-			"heikinzangyou >= 80 "+
-		"UNION ALL "+
-			"SELECT "+
-				"'60～80時間未満' NAME "+
-				",COUNT(employee_id) cnt "+
-		"FROM "+
-		"( "+
-			"SELECT "+
-				"employee_id "+
-				",(sum(kinmu_time) - sum(shotei_kinmu_count))/3 heikinzangyou "+
-			"FROM "+
-				"kintai_imp "+
-			"WHERE "+
-				"pay_target_date IN (select pay_target_date FROM (SELECT distinct pay_target_date FROM kintai_imp ORDER BY pay_target_date DESC LIMIT 3) tmp) "+
-			"GROUP BY "+
-				"employee_id "+
-		") target "+
-		"WHERE "+
-			"heikinzangyou BETWEEN 60 AND 79 "+
-		"UNION ALL "+
-		"SELECT "+
-			"'45～60時間未満' NAME "+
-			",COUNT(employee_id) cnt "+
-		"FROM "+
-		"( "+
-			"SELECT "+
-				"employee_id "+
-				",(sum(kinmu_time) - sum(shotei_kinmu_count))/3 heikinzangyou "+
-			"FROM "+
-				"kintai_imp "+
-			"WHERE "+
-				"pay_target_date IN (select pay_target_date FROM (SELECT distinct pay_target_date FROM kintai_imp ORDER BY pay_target_date DESC LIMIT 3) tmp) "+
-			"GROUP BY "+
-				"employee_id "+
-		") target "+
-		"WHERE "+
-			"heikinzangyou BETWEEN 45 AND 59")
+	rows, err := db.Query(getSQL("S-getBarChartData.txt"))
 	if err != nil {
 		panic(err.Error())
 	}
@@ -471,7 +423,7 @@ func getPieChartData(g *gin.Context) {
 	var name, value string
 
 	// コネクション作成
-	db, err := sql.Open("mysql", "root:p@ssw0rd@/study")
+	db, err := sql.Open("sqlserver", getconnString("ConnectionString.txt"))
 	if err != nil {
 		panic(err.Error())
 	}
@@ -479,60 +431,7 @@ func getPieChartData(g *gin.Context) {
 	defer db.Close()
 
 	//SQL実行
-	rows, err := db.Query(
-		"SELECT "+
-			"'80時間以上' NAME "+
-			",COUNT(employee_id) cnt "+
-		"FROM "+
-		"( "+
-			"SELECT "+
-				"employee_id "+
-				",(sum(kinmu_time) - sum(shotei_kinmu_count))/3 heikinzangyou "+
-			"FROM "+
-				"kintai_imp "+
-			"WHERE "+
-				"pay_target_date IN (select pay_target_date FROM (SELECT distinct pay_target_date FROM kintai_imp ORDER BY pay_target_date DESC LIMIT 3) tmp) "+
-			"GROUP BY "+
-				"employee_id "+
-		") target "+
-		"WHERE "+
-			"heikinzangyou >= 80 "+
-		"UNION ALL "+
-			"SELECT "+
-				"'60～80時間未満' NAME "+
-				",COUNT(employee_id) cnt "+
-		"FROM "+
-		"( "+
-			"SELECT "+
-				"employee_id "+
-				",(sum(kinmu_time) - sum(shotei_kinmu_count))/3 heikinzangyou "+
-			"FROM "+
-				"kintai_imp "+
-			"WHERE "+
-				"pay_target_date IN (select pay_target_date FROM (SELECT distinct pay_target_date FROM kintai_imp ORDER BY pay_target_date DESC LIMIT 3) tmp) "+
-			"GROUP BY "+
-				"employee_id "+
-		") target "+
-		"WHERE "+
-			"heikinzangyou BETWEEN 60 AND 79 "+
-		"UNION ALL "+
-		"SELECT "+
-			"'45～60時間未満' NAME "+
-			",COUNT(employee_id) cnt "+
-		"FROM "+
-		"( "+
-			"SELECT "+
-				"employee_id "+
-				",(sum(kinmu_time) - sum(shotei_kinmu_count))/3 heikinzangyou "+
-			"FROM "+
-				"kintai_imp "+
-			"WHERE "+
-				"pay_target_date IN (select pay_target_date FROM (SELECT distinct pay_target_date FROM kintai_imp ORDER BY pay_target_date DESC LIMIT 3) tmp) "+
-			"GROUP BY "+
-				"employee_id "+
-		") target "+
-		"WHERE "+
-			"heikinzangyou BETWEEN 45 AND 59")
+	rows, err := db.Query(getSQL("S-getPieChartData.txt"))
 
 	if err != nil {
 		panic(err.Error())
@@ -569,7 +468,7 @@ func getListData(g *gin.Context) {
 
 	//実行SQL
 	sqlStringHeader := "SELECT * FROM ( SELECT employee_id id, employee_nm name, "
-	sqlStringFooter := " overtime FROM kintai_imp WHERE pay_target_date IN( select pay_target_date FROM ( SELECT distinct pay_target_date FROM kintai_imp ORDER BY pay_target_date DESC LIMIT ? ) tmp ) GROUP BY employee_id ) target WHERE overtime >= ? ORDER BY overtime desc"
+	sqlStringFooter := " overtime FROM kintai_imp WHERE pay_target_date IN( select pay_target_date FROM ( SELECT distinct TOP (@top) pay_target_date FROM kintai_imp ORDER BY pay_target_date DESC) tmp ) GROUP BY employee_id,employee_nm ) target WHERE overtime >= @overtime ORDER BY overtime desc"
 
 	//条件別SQL
 	allOver := "(sum(kinmu_time) - sum(shotei_kinmu_count))"
@@ -583,57 +482,57 @@ func getListData(g *gin.Context) {
 	houteinaiAverage := "sum(houteinai_zangyo_time)/"
 
 	//limit数
-	sqlLimit := "3"
+	sqlLimit := 3
 
 	//パラメータに応じてSQLを選択
 	switch param.SqlTarget + param.SqlTerm {
 		//総残業直近1か月合計
 		case "00":
-			sqlLimit = "1"
+			sqlLimit = 1
 			ParamSql = allOver
 		//総残業直近3か月合計
 		case "01":
 			ParamSql = allOver
 		//総残業直近3か月平均
 		case "02":
-			ParamSql = allOverAverage + sqlLimit
+			ParamSql = allOverAverage + "3"
 		//普通残業直近1か月合計
 		case "10":
-			sqlLimit = "1"
+			sqlLimit = 1
 			ParamSql = houteigai
 		//普通残業直近3か月合計
 		case "11":
 			ParamSql = houteigai
 		//普通残業直近3か月平均
 		case "12":
-			ParamSql = houteigaiAverage + sqlLimit
+			ParamSql = houteigaiAverage + "3"
 		//深夜残業直近1か月合計
 		case "20":
-			sqlLimit = "1"
+			sqlLimit = 1
 			ParamSql = sinya
 		//深夜残業直近3か月合計
 		case "21":
 			ParamSql = sinya
 		//深夜残業直近3か月平均
 		case "22":
-			ParamSql = sinyaAverage  + sqlLimit
+			ParamSql = sinyaAverage  + "3"
 		//深夜残業直近1か月合計
 		case "30":
-			sqlLimit = "1"
+			sqlLimit = 1
 			ParamSql = houteinai
 		//深夜残業直近3か月合計
 		case "31":
 			ParamSql = houteinai
 		//深夜残業直近3か月平均
 		case "32":
-			ParamSql = houteinaiAverage + sqlLimit
+			ParamSql = houteinaiAverage + "3"
 	}
 
 	//scan用変数
 	var Id, Name, OverTime string
 
 	// コネクション作成
-	db, err := sql.Open("mysql", "root:p@ssw0rd@/study")
+	db, err := sql.Open("sqlserver", getconnString("ConnectionString.txt"))
 	if err != nil {
 		panic(err.Error())
 	}
@@ -641,7 +540,11 @@ func getListData(g *gin.Context) {
 	defer db.Close()
 
 	//SQL実行
-	rows, err := db.Query(sqlStringHeader + ParamSql + sqlStringFooter, sqlLimit, param.SqlTime)
+	rows, err := db.Query(sqlStringHeader + ParamSql + sqlStringFooter, 
+		sql.NamedArg{ Name: "top", Value: sqlLimit },
+		sql.NamedArg{ Name: "overtime", Value: param.SqlTime },
+	)
+
 	if err != nil {
 		panic(err.Error())
 	}
@@ -670,4 +573,20 @@ func Logout(g *gin.Context) {
     //log.Println("クリア処理")
     session.Save()
 
+}
+
+func getSQL(filename string) string {
+    text, err := ioutil.ReadFile("./SQL/" + filename)
+    if err != nil {
+        fmt.Println(err)
+    }
+    return string(text)
+}
+
+func getconnString(filename string) string {
+    text, err := ioutil.ReadFile("./" + filename)
+    if err != nil {
+        fmt.Println(err)
+    }
+    return string(text)
 }

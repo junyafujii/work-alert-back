@@ -1,0 +1,1 @@
+odbc:server=localhost;user id=admin;password=p@ssw0rd;database=wadb

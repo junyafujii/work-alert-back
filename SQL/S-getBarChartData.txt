@@ -1,0 +1,89 @@
+select
+    '80時間以上' NAME,
+    count(employee_id) cnt
+from
+    (
+        select
+            employee_id,
+            (sum(kinmu_time) - sum(shotei_kinmu_count)) / 3 heikinzangyou
+        from
+            kintai_imp
+        where
+            pay_target_date in(
+                select
+                    pay_target_date
+                from
+                    (
+                        select distinct top 3
+                            pay_target_date
+                        from
+                            kintai_imp
+                        order by
+                            pay_target_date desc
+                    ) tmp
+            )
+        group by
+            employee_id
+    ) target
+where
+    heikinzangyou >= 80
+union all
+select
+    '60～80時間未満' NAME,
+    count(employee_id) cnt
+from
+    (
+        select
+            employee_id,
+            (sum(kinmu_time) - sum(shotei_kinmu_count)) / 3 heikinzangyou
+        from
+            kintai_imp
+        where
+            pay_target_date in(
+                select
+                    pay_target_date
+                from
+                    (
+                        select distinct top 3
+                            pay_target_date
+                        from
+                            kintai_imp
+                        order by
+                            pay_target_date desc
+                    ) tmp
+            )
+        group by
+            employee_id
+    ) target
+where
+    heikinzangyou between 60 and 79
+union all
+select
+    '45～60時間未満' NAME,
+    count(employee_id) cnt
+from
+    (
+        select
+            employee_id,
+            (sum(kinmu_time) - sum(shotei_kinmu_count)) / 3 heikinzangyou
+        from
+            kintai_imp
+        where
+            pay_target_date in(
+                select
+                    pay_target_date
+                from
+                    (
+                        select distinct top 3
+                            pay_target_date
+                        from
+                            kintai_imp
+                        order by
+                            pay_target_date desc
+                    ) tmp
+            )
+        group by
+            employee_id
+    ) target
+where
+    heikinzangyou between 45 and 59

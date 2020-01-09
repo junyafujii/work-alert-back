@@ -1,0 +1,53 @@
+SELECT 
+			'80時間以上' NAME 
+			,COUNT(employee_id) cnt 
+		FROM 
+		( 
+			SELECT 
+				employee_id 
+				,(sum(kinmu_time) - sum(shotei_kinmu_count))/3 heikinzangyou 
+			FROM 
+				kintai_imp 
+			WHERE 
+				pay_target_date IN (select pay_target_date FROM (SELECT distinct top 3pay_target_date FROM kintai_imp ORDER BY pay_target_date DESC) tmp) 
+			GROUP BY 
+				employee_id 
+		) target 
+		WHERE 
+			heikinzangyou >= 80 
+		UNION ALL 
+			SELECT 
+				'60～80時間未満' NAME 
+				,COUNT(employee_id) cnt 
+		FROM 
+		( 
+			SELECT 
+				employee_id 
+				,(sum(kinmu_time) - sum(shotei_kinmu_count))/3 heikinzangyou 
+			FROM 
+				kintai_imp 
+			WHERE 
+				pay_target_date IN (select pay_target_date FROM (SELECT distinct top 3 pay_target_date FROM kintai_imp ORDER BY pay_target_date DESC) tmp) 
+			GROUP BY 
+				employee_id 
+		) target 
+		WHERE 
+			heikinzangyou BETWEEN 60 AND 79 
+		UNION ALL 
+		SELECT 
+			'45～60時間未満' NAME 
+			,COUNT(employee_id) cnt 
+		FROM 
+		( 
+			SELECT 
+				employee_id 
+				,(sum(kinmu_time) - sum(shotei_kinmu_count))/3 heikinzangyou 
+			FROM 
+				kintai_imp 
+			WHERE 
+				pay_target_date IN (select pay_target_date FROM (SELECT distinct top 3 pay_target_date FROM kintai_imp ORDER BY pay_target_date DESC) tmp) 
+			GROUP BY 
+				employee_id 
+		) target 
+		WHERE 
+			heikinzangyou BETWEEN 45 AND 59

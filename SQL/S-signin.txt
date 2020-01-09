@@ -1,0 +1,7 @@
+select
+    count(id) usercnt
+from
+    login_user
+where
+    id = @UserID
+    and password = @Password
